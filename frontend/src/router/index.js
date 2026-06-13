@@ -22,7 +22,7 @@ const routes = [
     children: [
       {
         path: '',
-        redirect: '/pc/file'
+        redirect: '/pc/shift'
       },
       {
         path: 'file',
@@ -35,6 +35,18 @@ const routes = [
       {
         path: 'user',
         component: () => import('@/views/pc/User.vue')
+      },
+      {
+        path: 'skill-matrix',
+        component: () => import('@/views/pc/SkillMatrix.vue')
+      },
+      {
+        path: 'shift',
+        component: () => import('@/views/pc/Shift.vue')
+      },
+      {
+        path: 'shift-evaluation/:id',
+        component: () => import('@/views/pc/ShiftEvaluation.vue')
       }
     ]
   },
