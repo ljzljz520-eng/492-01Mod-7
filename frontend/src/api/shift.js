@@ -49,6 +49,13 @@ export const shiftApi = {
       params
     })
   },
+  recommendTeam(id, data) {
+    return request({
+      url: `/shift/${id}/recommend-team`,
+      method: 'post',
+      data
+    })
+  },
   delete(id) {
     return request({
       url: `/shift/${id}`,

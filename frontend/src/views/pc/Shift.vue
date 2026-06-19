@@ -240,28 +240,22 @@
         <div class="flex items-center justify-between mb-4">
           <span class="text-lg font-medium text-gray-800">排班成员</span>
           <div class="flex items-center gap-3">
-            <el-select 
-              v-model="selectedSkills" 
-              multiple 
-              placeholder="选择所需技能"
-              style="width: 300px"
-              @change="handleSkillChange"
+            <el-button 
+              type="success" 
+              size="small"
+              @click="addPositionRequirement"
             >
-              <el-option 
-                v-for="skill in skills" 
-                :key="skill.id" 
-                :label="skill.skillName + (skill.skillType === 'key' ? ' (关键)' : '')" 
-                :value="skill.id"
-              />
-            </el-select>
+              <el-icon><Plus /></el-icon>
+              添加岗位
+            </el-button>
             <el-button 
               type="primary" 
               size="small"
-              @click="handleRecommend"
-              :disabled="selectedSkills.length === 0"
+              @click="handleRecommendTeam"
+              :disabled="positionRequirements.length === 0"
             >
               <el-icon><MagicStick /></el-icon>
-              智能推荐
+              智能推荐组合
             </el-button>
           </div>
         </div>
@@ -288,54 +282,172 @@
           </el-alert>
         </div>
 
-        <div class="recommend-list mb-4" v-if="recommendList.length > 0">
-          <div class="text-sm text-gray-600 mb-2">
-            推荐人员（按匹配度排序）：
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <div 
-              v-for="worker in recommendList" 
-              :key="worker.userId"
-              class="recommend-card"
-              :class="{ 'selected': selectedUserIds.includes(worker.userId) }"
-              @click="toggleRecommendWorker(worker)"
-            >
-              <div class="flex items-center justify-between">
-                <span class="font-medium">{{ worker.nickname }}</span>
-                <el-tag size="small" type="success">匹配度: {{ worker.matchScore }}</el-tag>
+        <div class="position-requirements mb-6">
+          <div class="text-sm font-medium text-gray-700 mb-3">岗位要求配置：</div>
+          <div 
+            v-for="(req, index) in positionRequirements" 
+            :key="index"
+            class="position-requirement-card mb-4"
+          >
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-3">
+                <el-input 
+                  v-model="req.positionName" 
+                  placeholder="岗位名称" 
+                  size="small"
+                  style="width: 150px"
+                />
+                <el-input-number 
+                  v-model="req.count" 
+                  :min="1" 
+                  :max="10"
+                  size="small"
+                  controls-position="right"
+                />
+                <span class="text-sm text-gray-500">人</span>
+                <el-select 
+                  v-model="req.minProficiency" 
+                  placeholder="最低熟练度"
+                  size="small"
+                  style="width: 120px"
+                >
+                  <el-option label="不限" :value="1" />
+                  <el-option label="初级以上" :value="2" />
+                  <el-option label="中级以上" :value="3" />
+                  <el-option label="高级以上" :value="4" />
+                </el-select>
               </div>
-              <div class="text-xs text-gray-500 mt-1">
-                <span v-for="skill in worker.skills" :key="skill.skillId" class="mr-2">
-                  {{ skill.skillName }}: Lv.{{ skill.proficiency }}
-                </span>
+              <el-button 
+                type="danger" 
+                size="small"
+                link
+                @click="removePositionRequirement(index)"
+              >
+                删除
+              </el-button>
+            </div>
+            <div class="position-skills">
+              <span class="text-sm text-gray-500 mr-3">所需技能：</span>
+              <el-select 
+                v-model="req.requiredSkillIds" 
+                multiple 
+                placeholder="请选择该岗位所需技能"
+                size="small"
+                style="width: calc(100% - 100px)"
+              >
+                <el-option 
+                  v-for="skill in skills" 
+                  :key="skill.id" 
+                  :label="skill.skillName + (skill.skillType === 'key' ? ' (关键)' : '')" 
+                  :value="skill.id"
+                />
+              </el-select>
+            </div>
+          </div>
+          <el-empty 
+            v-if="positionRequirements.length === 0" 
+            description="点击上方'添加岗位'按钮配置岗位要求"
+            :image-size="100"
+          />
+        </div>
+
+        <div class="recommend-results mb-4" v-if="recommendResults.length > 0">
+          <div class="text-sm font-medium text-gray-700 mb-3">
+            推荐组合：
+          </div>
+          <div 
+            v-for="(result, index) in recommendResults" 
+            :key="index"
+            class="recommend-result-card mb-4"
+          >
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-gray-800">{{ result.positionName }}</span>
+                <el-tag size="small" v-if="result.message" type="danger">
+                  {{ result.message }}
+                </el-tag>
+              </div>
+              <el-button 
+                type="primary" 
+                size="small"
+                @click="addRecommendedToSelected(result)"
+                :disabled="!result.selected"
+              >
+                添加推荐人员
+              </el-button>
+            </div>
+            <div v-if="result.candidates && result.candidates.length > 0" class="flex flex-wrap gap-2">
+              <div 
+                v-for="(worker, wIndex) in result.candidates" 
+                :key="worker.userId"
+                class="recommend-card"
+                :class="{ 
+                  'selected': selectedUserIds.includes(worker.userId),
+                  'best-match': result.selected && result.selected.userId === worker.userId 
+                }"
+                @click="toggleRecommendWorker(worker)"
+              >
+                <div class="flex items-center justify-between">
+                  <span class="font-medium">{{ worker.nickname }}</span>
+                  <el-tag 
+                    size="small" 
+                    :type="result.selected && result.selected.userId === worker.userId ? 'success' : 'info'"
+                  >
+                    {{ result.selected && result.selected.userId === worker.userId ? '推荐' : '候选' }}: {{ worker.matchScore }}
+                  </el-tag>
+                </div>
+                <div class="text-xs text-gray-500 mt-1">
+                  <span v-for="skill in worker.skills" :key="skill.skillId" class="mr-2">
+                    {{ skill.skillName }}: Lv.{{ skill.proficiency }}
+                  </span>
+                </div>
               </div>
             </div>
+          </div>
+          <div class="mt-4 text-center">
+            <el-button 
+              type="success" 
+              size="large"
+              @click="addAllRecommendedToSelected"
+              :disabled="!hasValidRecommendations"
+            >
+              <el-icon><Check /></el-icon>
+              一键添加所有推荐人员
+            </el-button>
           </div>
         </div>
 
         <div class="selected-members">
-          <div class="text-sm text-gray-600 mb-2">
-            已选成员 ({{ selectedUserIds.length }}人):
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-gray-600">
+              已选成员 ({{ selectedUserIds.length }}人):
+            </span>
+            <el-button 
+              type="primary" 
+              link
+              size="small"
+              @click="workerDialogVisible = true"
+            >
+              手动添加成员
+            </el-button>
           </div>
-          <el-tag 
-            v-for="userId in selectedUserIds" 
-            :key="userId"
-            closable
-            type="primary"
-            class="mr-2 mb-2"
-            @close="removeMember(userId)"
-          >
-            {{ getUserName(userId) }}
-          </el-tag>
-          <el-button 
-            v-if="selectedUserIds.length === 0"
-            type="primary" 
-            link
-            size="small"
-            @click="workerDialogVisible = true"
-          >
-            添加成员
-          </el-button>
+          <div v-if="selectedUserIds.length > 0">
+            <el-tag 
+              v-for="userId in selectedUserIds" 
+              :key="userId"
+              closable
+              type="primary"
+              class="mr-2 mb-2"
+              @close="removeMember(userId)"
+            >
+              {{ getUserName(userId) }}
+            </el-tag>
+          </div>
+          <el-empty 
+            v-else
+            description="暂无成员，通过上方智能推荐或手动添加"
+            :image-size="80"
+          />
         </div>
       </div>
 
@@ -450,7 +562,7 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, MagicStick } from '@element-plus/icons-vue'
+import { Plus, MagicStick, Check } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { shiftApi } from '@/api/shift'
 import { skillApi, userSkillApi } from '@/api/skill'
@@ -462,6 +574,7 @@ const tableData = ref([])
 const skills = ref([])
 const workerList = ref([])
 const recommendList = ref([])
+const recommendResults = ref([])
 const shiftRiskList = ref([])
 const shiftDetail = ref(null)
 
@@ -509,6 +622,12 @@ const formRules = {
 const selectedSkills = ref([])
 const selectedUserIds = ref([])
 const tempSelectedUserIds = ref([])
+
+const positionRequirements = ref([])
+
+const hasValidRecommendations = computed(() => {
+  return recommendResults.value.some(r => r.selected)
+})
 
 const loadSkills = async () => {
   try {
@@ -584,7 +703,9 @@ const handleAdd = () => {
   selectedSkills.value = []
   selectedUserIds.value = []
   recommendList.value = []
+  recommendResults.value = []
   shiftRiskList.value = []
+  positionRequirements.value = []
   dialogVisible.value = true
   if (formRef.value) {
     formRef.value.clearValidate()
@@ -604,7 +725,72 @@ const handleEdit = (row) => {
   })
   selectedUserIds.value = []
   recommendList.value = []
+  recommendResults.value = []
+  positionRequirements.value = []
   loadShiftDetail(row.id)
+}
+
+const addPositionRequirement = () => {
+  positionRequirements.value.push({
+    positionName: '',
+    requiredSkillIds: [],
+    minProficiency: 1,
+    count: 1
+  })
+}
+
+const removePositionRequirement = (index) => {
+  positionRequirements.value.splice(index, 1)
+  recommendResults.value = []
+}
+
+const handleRecommendTeam = async () => {
+  const invalidReq = positionRequirements.value.find(req => 
+    !req.positionName || req.requiredSkillIds.length === 0
+  )
+  if (invalidReq) {
+    ElMessage.warning('请填写完整的岗位名称和所需技能')
+    return
+  }
+
+  try {
+    const res = await shiftApi.recommendTeam(formData.id || 0, {
+      requirements: positionRequirements.value
+    })
+    if (res.code === 200) {
+      recommendResults.value = res.data
+      checkShiftRisk()
+      if (res.data.length > 0) {
+        ElMessage.success('推荐完成，请查看下方推荐组合')
+      }
+    }
+  } catch (error) {
+    console.error(error)
+    ElMessage.error('推荐失败')
+  }
+}
+
+const addRecommendedToSelected = (result) => {
+  if (!result.selected) return
+  if (!selectedUserIds.value.includes(result.selected.userId)) {
+    selectedUserIds.value.push(result.selected.userId)
+  }
+  ElMessage.success(`已添加 ${result.selected.nickname} 到排班`)
+}
+
+const addAllRecommendedToSelected = () => {
+  let addedCount = 0
+  for (const result of recommendResults.value) {
+    if (result.selected && !selectedUserIds.value.includes(result.selected.userId)) {
+      selectedUserIds.value.push(result.selected.userId)
+      addedCount++
+    }
+  }
+  if (addedCount > 0) {
+    ElMessage.success(`已添加 ${addedCount} 名推荐人员到排班`)
+  } else {
+    ElMessage.info('没有可添加的推荐人员')
+  }
 }
 
 const loadShiftDetail = async (id) => {
@@ -663,10 +849,17 @@ const checkShiftRisk = async () => {
   try {
     const res = await userSkillApi.getRiskWarning()
     if (res.code === 200) {
-      const keySkills = skills.value.filter(s => s.skillType === 'key')
-      const selectedSkillIds = selectedSkills.value
+      const allSkillIds = new Set()
+      for (const req of positionRequirements.value) {
+        if (req.requiredSkillIds) {
+          req.requiredSkillIds.forEach(id => allSkillIds.add(id))
+        }
+      }
+      if (allSkillIds.size === 0) {
+        allSkillIds.add(...selectedSkills.value)
+      }
       shiftRiskList.value = res.data.filter(r => 
-        r.isRisk && selectedSkillIds.includes(r.skillId)
+        r.isRisk && allSkillIds.has(r.skillId)
       )
     }
   } catch (error) {
@@ -869,6 +1062,31 @@ onMounted(() => {
 
 .shift-detail {
   padding: 10px 0;
+}
+
+.position-requirement-card {
+  padding: 16px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+}
+
+.position-skills {
+  display: flex;
+  align-items: flex-start;
+}
+
+.recommend-result-card {
+  padding: 16px;
+  background: #f0f9eb;
+  border: 1px solid #c2e7b0;
+  border-radius: 8px;
+}
+
+.recommend-card.best-match {
+  border-color: #67c23a;
+  background: #f0f9eb;
+  border-width: 2px;
 }
 
 :deep(.el-card) {

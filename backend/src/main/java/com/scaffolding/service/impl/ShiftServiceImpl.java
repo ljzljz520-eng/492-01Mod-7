@@ -3,8 +3,10 @@ package com.scaffolding.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.scaffolding.dto.PositionRequirementDTO;
 import com.scaffolding.dto.ShiftDetailDTO;
 import com.scaffolding.dto.ShiftMemberDTO;
+import com.scaffolding.dto.ShiftRecommendResultDTO;
 import com.scaffolding.dto.SkillDetailDTO;
 import com.scaffolding.entity.*;
 import com.scaffolding.mapper.*;
@@ -324,6 +326,175 @@ public class ShiftServiceImpl extends ServiceImpl<ShiftMapper, Shift> implements
             dto.setSkills(skillDetails);
             result.add(dto);
         }
+        return result;
+    }
+
+    @Override
+    public List<ShiftRecommendResultDTO> recommendShiftTeam(Long shiftId, List<PositionRequirementDTO> requirements) {
+        if (requirements == null || requirements.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> allSkillIds = new ArrayList<>();
+        for (PositionRequirementDTO req : requirements) {
+            if (req.getRequiredSkillIds() != null) {
+                allSkillIds.addAll(req.getRequiredSkillIds());
+            }
+        }
+
+        List<Skill> allSkills = skillMapper.selectBatchIds(new ArrayList<>(new HashSet<>(allSkillIds)));
+        Map<Long, Skill> skillMap = allSkills.stream()
+            .collect(Collectors.toMap(Skill::getId, s -> s));
+
+        List<UserSkill> allUserSkills = userSkillMapper.selectList(
+            new LambdaQueryWrapper<UserSkill>().in(UserSkill::getSkillId, allSkillIds)
+        );
+
+        Map<Long, List<UserSkill>> userSkillMap = allUserSkills.stream()
+            .collect(Collectors.groupingBy(UserSkill::getUserId));
+
+        List<Long> allUserIds = new ArrayList<>(userSkillMap.keySet());
+        List<User> allUsers = userMapper.selectBatchIds(allUserIds);
+        Map<Long, User> userMap = allUsers.stream()
+            .collect(Collectors.toMap(User::getId, u -> u));
+
+        List<ShiftRecommendResultDTO> result = new ArrayList<>();
+        Set<Long> selectedUserIds = new HashSet<>();
+
+        for (PositionRequirementDTO req : requirements) {
+            ShiftRecommendResultDTO positionResult = new ShiftRecommendResultDTO();
+            positionResult.setPositionName(req.getPositionName());
+            positionResult.setRequiredSkillIds(req.getRequiredSkillIds());
+
+            List<ShiftMemberDTO> candidates = findCandidatesForPosition(
+                req, userSkillMap, userMap, skillMap, selectedUserIds
+            );
+
+            positionResult.setCandidates(candidates);
+
+            if (candidates.isEmpty()) {
+                positionResult.setMessage("没有找到满足技能要求的工人");
+            } else {
+                int count = req.getCount() != null ? req.getCount() : 1;
+                int selectCount = Math.min(count, candidates.size());
+                List<ShiftMemberDTO> selectedList = candidates.subList(0, selectCount);
+                
+                if (selectCount > 0) {
+                    positionResult.setSelected(selectedList.get(0));
+                    positionResult.setTotalScore(selectedList.get(0).getMatchScore());
+                }
+
+                for (ShiftMemberDTO member : selectedList) {
+                    selectedUserIds.add(member.getUserId());
+                }
+            }
+
+            result.add(positionResult);
+        }
+
+        return result;
+    }
+
+    private List<ShiftMemberDTO> findCandidatesForPosition(
+            PositionRequirementDTO req,
+            Map<Long, List<UserSkill>> userSkillMap,
+            Map<Long, User> userMap,
+            Map<Long, Skill> skillMap,
+            Set<Long> excludedUserIds) {
+
+        List<Long> requiredSkillIds = req.getRequiredSkillIds();
+        if (requiredSkillIds == null || requiredSkillIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Integer minProficiency = req.getMinProficiency() != null ? req.getMinProficiency() : 1;
+
+        List<Map.Entry<Long, Integer>> scoredUsers = new ArrayList<>();
+
+        for (Map.Entry<Long, List<UserSkill>> entry : userSkillMap.entrySet()) {
+            Long userId = entry.getKey();
+            if (excludedUserIds.contains(userId)) {
+                continue;
+            }
+
+            List<UserSkill> usList = entry.getValue();
+            Set<Long> userSkillIds = usList.stream()
+                .map(UserSkill::getSkillId).collect(Collectors.toSet());
+
+            boolean hasAllSkills = true;
+            int totalProficiency = 0;
+            int certifiedCount = 0;
+
+            for (Long skillId : requiredSkillIds) {
+                if (!userSkillIds.contains(skillId)) {
+                    hasAllSkills = false;
+                    break;
+                }
+                UserSkill us = usList.stream()
+                    .filter(u -> u.getSkillId().equals(skillId))
+                    .findFirst().orElse(null);
+                if (us != null) {
+                    if (us.getProficiency() < minProficiency) {
+                        hasAllSkills = false;
+                        break;
+                    }
+                    totalProficiency += us.getProficiency();
+                    if (us.getCertified() != null && us.getCertified() == 1) {
+                        certifiedCount++;
+                    }
+                }
+            }
+
+            if (hasAllSkills) {
+                int score = totalProficiency * 10 + certifiedCount * 20;
+                scoredUsers.add(new AbstractMap.SimpleEntry<>(userId, score));
+            }
+        }
+
+        scoredUsers.sort((a, b) -> b.getValue() - a.getValue());
+
+        List<ShiftMemberDTO> result = new ArrayList<>();
+        for (Map.Entry<Long, Integer> entry : scoredUsers) {
+            Long userId = entry.getKey();
+            User user = userMap.get(userId);
+            if (user == null) continue;
+
+            ShiftMemberDTO dto = new ShiftMemberDTO();
+            dto.setUserId(user.getId());
+            dto.setNickname(user.getNickname());
+            dto.setMatchScore(entry.getValue());
+
+            List<SkillDetailDTO> skillDetails = new ArrayList<>();
+            List<UserSkill> usList = userSkillMap.getOrDefault(userId, Collections.emptyList());
+            Map<Long, UserSkill> usMap = usList.stream()
+                .collect(Collectors.toMap(UserSkill::getSkillId, us -> us));
+
+            for (Long skillId : requiredSkillIds) {
+                Skill skill = skillMap.get(skillId);
+                if (skill == null) continue;
+
+                SkillDetailDTO detail = new SkillDetailDTO();
+                detail.setSkillId(skill.getId());
+                detail.setSkillCode(skill.getSkillCode());
+                detail.setSkillName(skill.getSkillName());
+                detail.setSkillType(skill.getSkillType());
+
+                UserSkill us = usMap.get(skillId);
+                if (us != null) {
+                    detail.setHasSkill(true);
+                    detail.setProficiency(us.getProficiency());
+                    detail.setCertified(us.getCertified());
+                } else {
+                    detail.setHasSkill(false);
+                    detail.setProficiency(0);
+                    detail.setCertified(0);
+                }
+                skillDetails.add(detail);
+            }
+            dto.setSkills(skillDetails);
+            result.add(dto);
+        }
+
         return result;
     }
 }

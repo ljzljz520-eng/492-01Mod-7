@@ -1,10 +1,14 @@
 package com.scaffolding.controller;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.scaffolding.common.PageResult;
 import com.scaffolding.common.Result;
+import com.scaffolding.dto.PositionRequirementDTO;
 import com.scaffolding.dto.ShiftDetailDTO;
 import com.scaffolding.dto.ShiftMemberDTO;
+import com.scaffolding.dto.ShiftRecommendResultDTO;
 import com.scaffolding.entity.Shift;
 import com.scaffolding.service.ShiftService;
 import io.swagger.annotations.Api;
@@ -15,6 +19,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +31,9 @@ public class ShiftController {
 
     @Autowired
     private ShiftService shiftService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @GetMapping("/page")
     @ApiOperation("分页查询排班")
@@ -192,6 +200,27 @@ public class ShiftController {
         } catch (Exception e) {
             log.error("删除排班失败", e);
             return Result.error("删除失败：" + e.getMessage());
+        }
+    }
+
+    @PostMapping("/{id}/recommend-team")
+    @ApiOperation("按岗位推荐排班组合")
+    public Result<List<ShiftRecommendResultDTO>> recommendTeam(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> params) {
+        try {
+            Object requirementsObj = params.get("requirements");
+            List<PositionRequirementDTO> requirements = new ArrayList<>();
+            if (requirementsObj != null) {
+                requirements = objectMapper.convertValue(requirementsObj,
+                    new TypeReference<List<PositionRequirementDTO>>() {});
+            }
+
+            List<ShiftRecommendResultDTO> result = shiftService.recommendShiftTeam(id, requirements);
+            return Result.success(result);
+        } catch (Exception e) {
+            log.error("推荐排班组合失败", e);
+            return Result.error("推荐失败：" + e.getMessage());
         }
     }
 }

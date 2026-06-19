@@ -1,5 +1,7 @@
 package com.scaffolding.controller;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scaffolding.common.Result;
 import com.scaffolding.entity.ShiftEvaluation;
 import com.scaffolding.service.ShiftEvaluationService;
@@ -8,6 +10,7 @@ import io.swagger.annotations.ApiOperation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -19,6 +22,9 @@ public class ShiftEvaluationController {
 
     @Autowired
     private ShiftEvaluationService shiftEvaluationService;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @GetMapping("/shift/{shiftId}")
     @ApiOperation("获取排班的所有评价")
@@ -68,8 +74,12 @@ public class ShiftEvaluationController {
             @PathVariable Long shiftId,
             @RequestBody Map<String, Object> params) {
         try {
-            @SuppressWarnings("unchecked")
-            List<ShiftEvaluation> evaluations = (List<ShiftEvaluation>) params.get("evaluations");
+            Object evaluationsObj = params.get("evaluations");
+            List<ShiftEvaluation> evaluations = new ArrayList<>();
+            if (evaluationsObj != null) {
+                evaluations = objectMapper.convertValue(evaluationsObj, 
+                    new TypeReference<List<ShiftEvaluation>>() {});
+            }
             Long evaluatorId = params.get("evaluatorId") != null ?
                     Long.valueOf(params.get("evaluatorId").toString()) : null;
 
